@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Demo</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+</head>
+
+<body style="margin:0px;">
+
+<script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.153.0/build/three.module.js"
+    }
+
+  }
+</script>
+
+
+<script type="module">
+
+	import * as THREE from 'three';
+	import { OrbitControls } from 'https://unpkg.com/three@0.153.0/examples/jsm/controls/OrbitControls.js';
+	
+	//scene
+	const scene = new THREE.Scene();
+	const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+	camera.position.set(0, 600, 600);
+	const renderer = new THREE.WebGLRenderer({antialias: true});
+	renderer.setSize(window.innerWidth, window.innerHeight);
+	document.body.appendChild(renderer.domElement);	
+
+	const controls = new OrbitControls( camera, renderer.domElement );
+	
+	//ambiant light
+	const ambient = new THREE.AmbientLight( 0xffffff, 0.4 );
+	scene.add( ambient );
+
+	//basic directional light	
+	const dirLight = new THREE.DirectionalLight( 0xffffff, 0.7 );
+	dirLight.position.set( 0,600,-900);
+	dirLight.castShadow = false;
+	scene.add( dirLight );
+	
+	//texture
+	const texture = new THREE.TextureLoader().load( 'checker.png' );
+	texture.minFilter = THREE.NearestFilter;
+	texture.magFilter = THREE.NearestFilter;
+	texture.anisotropy = 1;
+	texture.wrapS = THREE.RepeatWrapping;
+	texture.wrapT = THREE.RepeatWrapping;
+	texture.repeat.set( 5 , 5 );
+
+		//material
+	const material = new THREE.MeshPhongMaterial( {
+		map: texture,
+		color: 0x22762c,
+		flatShading:true,
+		shininess:0,
+		wireframe:false,
+		transparent:false,
+		dithering : true,
+	} );
+
+	//sphere 1
+	const geometry1 = new THREE.SphereGeometry( 120, 32, 16 );
+	const mesh1 = new THREE.Mesh( geometry1);
+	mesh1.position.set(0,0,0);
+	scene.add(mesh1);
+	
+	//sphere 2
+	const geometry2 = new THREE.SphereGeometry( 200, 32, 16 );
+	const mesh2 = new THREE.Mesh( geometry2, material);
+	mesh2.position.set(300,0,0);
+	scene.add(mesh2);
+
+	//sphere 3
+	const geometry3 = new THREE.SphereGeometry( 120, 32, 16 );
+	const mesh3 = new THREE.Mesh( geometry3);
+	mesh3.position.set(600,0,0);
+	scene.add(mesh3);
+	
+	//shader injection
+	material.onBeforeCompile = function ( shader ) {
+		
+		//customs uniforms
+		shader.uniforms.ditherTex = { value: texture };
+		shader.uniforms.opac = { value: 0.8 };
+		shader.fragmentShader = 'uniform float opac;\n' + shader.fragmentShader;
+		
+		//dither texture (currently not used)
+		shader.fragmentShader = 'uniform sampler2D ditherTex;\n' + shader.fragmentShader;
+		
+		//dither pattern function
+		shader.fragmentShader = 
+			'float bayerDither2x2( vec2 v ) {\n'+
+				'return mod( 3.0 * v.y + 2.0 * v.x, 4.0 );\n'+
+			'}\n'+
+			'float bayerDither4x4( vec2 v ) {\n'+
+				'vec2 P1 = mod( v, 2.0 );\n'+
+				'vec2 P2 = mod( floor( 0.5  * v ), 2.0 );\n'+
+				'return 4.0 * bayerDither2x2( P1 ) + bayerDither2x2( P2 );\n'+
+			'}\n'+ shader.fragmentShader;
+		
+		//this inclusion is for debuggin only		
+		shader.fragmentShader = shader.fragmentShader.replace(
+		'#include <map_fragment>',
+		[
+		
+		'#ifdef USE_MAP',
+		'diffuseColor *= texture2D( map, vMapUv );',
+		'#endif'
+		
+		].join( '\n' )
+		);
+		
+		//remove native threeJS dithering chunk	
+		shader.fragmentShader = shader.fragmentShader.replace(
+		'#include <dithering_pars_fragment>',
+		[
+		'//nothing',
+		].join( '\n' )
+		);
+
+		//replace dithering output with custom one
+		shader.fragmentShader = shader.fragmentShader.replace(
+		'#include <dithering_fragment>',
+		[
+		
+		'#ifdef DITHERING',
+		'//if( texture2D( ditherTex, gl_FragCoord.xy / 4.0 ).r > opac ) discard;',
+		'if( ( bayerDither4x4( floor( mod( gl_FragCoord.xy, 4.0 ) ) ) ) / 16.0 >= opac ) discard;',
+		'#endif',
+		
+		].join( '\n' )
+		);			
+		
+	};
+	
+	renderer.setAnimationLoop( render );	
+	
+	function render(){
+		renderer.render(scene, camera);
+	}
+
+	function onWindowResize() {
+		camera.aspect = window.innerWidth / window.innerHeight;
+		camera.updateProjectionMatrix();
+		renderer.setSize( window.innerWidth, window.innerHeight );
+	}	
+	
+</script>
+
+
+</body>
+</html>
